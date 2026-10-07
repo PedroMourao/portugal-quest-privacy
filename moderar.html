@@ -1,0 +1,286 @@
+<!doctype html>
+<!--
+  Portugal Quest — página de confirmação dos botões do email de moderação
+  (docs/22 §C.4, docs/21 «Email v2»). ESTÁTICA: sozinha não faz nada.
+
+  Publicar: copiar ESTE ficheiro para a raiz do repositório do site da política
+  (portugal-quest-privacy) → https://pedromourao.github.io/portugal-quest-privacy/moderar.html
+  Se mudar de sítio, pôr o URL novo no segredo MODERAR_PAGINA das Edge Functions
+  `denuncias-email` e `moderar` (a `moderar` só aceita pedidos desta origem).
+
+  Como funciona: o botão do email abre moderar.html#t=<token>[&p=…]. O token vai
+  no fragmento (#): o browser nunca o manda ao GitHub Pages, e quem abrir o link
+  sem tocar em «Confirmar» (incluindo os leitores de links do Gmail) não executa
+  nada. A página pede o cartão (op 'ver', não gasta o link) e só o toque em
+  «Confirmar» faz a ação (op 'executar', uso único).
+  O PIN da moderação (docs/22 §D.7) é pedido para VER A FOTO e para EXECUTAR: um
+  email reencaminhado não chega para moderar. Pode ficar lembrado neste browser.
+  A foto NUNCA se descarrega sozinha: só com um toque em «Ver foto»; urgentes,
+  escondidas e ambíguas da app antiga vêm desfocadas; «criança em risco» nunca.
+  O projeto Supabase está FIXO aqui e na CSP (o `p=` do link é ignorado): um
+  link feito por outra pessoa para esta página não a põe a falar com outro
+  servidor.
+  Tudo o que vem do servidor entra por textContent (nunca innerHTML).
+-->
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src blob:; connect-src https://ldsostgcoiwvwvuvuhme.supabase.co; base-uri 'none'; form-action 'none'">
+<title>Moderação · Portugal Quest</title>
+<style>
+  :root { color-scheme: light dark; --fundo: #f6f4ef; --cartao: #fff; --texto: #1d1d1b; --suave: #5f5f5a; --linha: #e2ded4;
+          --urgente: #B3261E; --alta: #B45309; --normal: #123A66; --ok: #1E6B3A; --perigo-fundo: #FDECEA; }
+  @media (prefers-color-scheme: dark) { :root { --fundo: #151513; --cartao: #22221f; --texto: #f1efe9; --suave: #b3b0a6; --linha: #3a3934; --perigo-fundo: #3a1714; } }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--fundo); color: var(--texto); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 600px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 15px; font-weight: 600; color: var(--suave); margin: 4px 0 12px; }
+  .cartao { background: var(--cartao); border: 1px solid var(--linha); border-radius: 12px; overflow: hidden; }
+  .faixa { padding: 10px 14px; color: #fff; font-weight: 700; background: var(--normal); }
+  .faixa.urgente { background: var(--urgente); } .faixa.alta { background: var(--alta); }
+  .corpo { padding: 14px; }
+  .linha { margin: 4px 0; } .suave { color: var(--suave); font-size: 14px; }
+  .rotulo { color: var(--suave); font-size: 12px; font-weight: 700; }
+  .foto { position: relative; margin: 10px 0; border-radius: 8px; overflow: hidden; background: #0002; }
+  .foto img { display: block; width: 100%; height: auto; }
+  .foto.desfocada img { filter: blur(24px); }
+  .foto button { position: absolute; inset: auto 8px 8px auto; }
+  .aviso { padding: 10px 12px; border-radius: 8px; background: #0001; margin: 10px 0; }
+  .aviso.perigo { background: var(--perigo-fundo); color: var(--urgente); font-weight: 600; border: 1px solid var(--urgente); }
+  .acao { margin-top: 14px; padding: 12px; border-radius: 8px; border: 2px solid var(--linha); }
+  .pin { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-top: 10px; }
+  .pin input[type=password] { width: 9em; font: inherit; letter-spacing: .2em; padding: 8px; border-radius: 8px; border: 1px solid var(--linha); background: transparent; color: inherit; }
+  .pin label { font-size: 14px; color: var(--suave); }
+  textarea { width: 100%; min-height: 64px; margin-top: 8px; padding: 8px; border-radius: 8px; border: 1px solid var(--linha);
+             background: transparent; color: inherit; font: inherit; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+           background: var(--normal); color: #fff; }
+  button.secundario { background: transparent; color: var(--texto); border: 1px solid var(--linha); }
+  button.grande { width: 100%; padding: 14px; margin-top: 12px; font-size: 17px; }
+  button.perigo { background: var(--urgente); }
+  button:disabled { opacity: .55; cursor: default; }
+  .feito { color: var(--ok); font-weight: 700; }
+  .erro { color: var(--urgente); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Portugal Quest · moderação</h1>
+  <div id="estado" class="aviso">A carregar…</div>
+  <div id="cartao" class="cartao" hidden>
+    <div id="faixa" class="faixa"></div>
+    <div class="corpo">
+      <div id="menores" class="aviso perigo" hidden>Criança em risco: a foto não se mostra aqui. Não a procures. Decide pela descrição — apagar ou banir guarda a prova 90 dias — e comunica à Polícia Judiciária (docs/21).</div>
+      <button id="verFoto" class="secundario" type="button" hidden>Ver foto</button>
+      <div id="foto" class="foto" hidden><img id="img" alt="Foto denunciada"><button id="mostrar" type="button">Mostrar</button></div>
+      <div id="semFoto" class="aviso suave" hidden></div>
+      <div id="info"></div>
+      <div id="acao" class="acao" hidden>
+        <div id="descricao"></div>
+        <textarea id="nota" maxlength="500" placeholder="Nota para ti (opcional, fica na denúncia)"></textarea>
+      </div>
+      <div id="pinCaixa" class="pin" hidden>
+        <label for="pin">PIN da moderação</label>
+        <input id="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" pattern="[0-9]*">
+        <label><input id="lembrar" type="checkbox"> Lembrar neste browser</label>
+      </div>
+      <button id="confirmar" class="grande" type="button" hidden>Confirmar</button>
+      <div id="resultado" class="aviso" hidden></div>
+    </div>
+  </div>
+  <p class="suave">Cada botão do email vale 72 h e só uma vez. Não reencaminhes o email de moderação.</p>
+</main>
+<script>
+(function () {
+  'use strict';
+  // O projeto é fixo (e a CSP só deixa falar com ele): o `p=` do link é ignorado.
+  var URL_F = 'https://ldsostgcoiwvwvuvuhme.supabase.co/functions/v1/moderar';
+  var CHAVE_PIN = 'pq-moderacao-pin';
+  var MOTIVOS = {
+    'sexual': 'Nudez ou conteúdo sexual', 'menores': 'Uma criança em risco', 'violencia': 'Violência ou imagens chocantes',
+    'ofensivo': 'Ódio, insultos ou ameaças', 'dados-pessoais': 'Expõe alguém sem autorização', 'perigoso': 'Perigoso ou ilegal',
+    'spam': 'Spam, publicidade ou burla', 'fora-do-local': 'Não é deste local', 'nao-e-dele': 'A foto não é desta pessoa',
+    'nome-ofensivo': 'Nome ou estandarte ofensivo', 'batota': 'Faz batota', 'outro': 'Outro motivo'
+  };
+  var TIPOS_ERRO = { 'facto': 'Facto errado', 'coordenadas': 'Local no sítio errado', 'foto': 'Foto / descrição',
+                     'fechado': 'Fechado / não existe', 'outro': 'Outro' };
+  var ACOES = { 'apagar': 'Apagar publicação', 'manter': 'Não há problema', 'fechar': 'Fechar denúncia',
+                'expulsar': 'Expulsar do grupo', 'banir': 'Banir', 'apagar-grupo': 'Apagar o grupo',
+                'resolver': 'Resolvido', 'rejeitar': 'Rejeitar' };
+  var FEITAS = { 'apagada': 'publicação apagada', 'mantida': 'sem problema (rejeitada)', 'expulso': 'expulso do grupo', 'banido': 'banido',
+                 'grupo-apagado': 'grupo apagado', 'resolvido': 'resolvido', 'rejeitado': 'rejeitado' };
+  var ALVOS = { 'publicacao': 'publicação', 'membro': 'membro', 'grupo': 'grupo', 'local': 'erro num local' };
+  var ERROS = {
+    'link_invalido': 'Este link não é válido.', 'link_expirado': 'Este link expirou (cada botão vale 72 h). Volta no email «Ainda por decidir»; se for urgente, trata no painel.',
+    'link_usado': 'Este botão já foi usado.', 'ja_tratada': 'Esta denúncia já foi tratada.',
+    'acao_invalida': 'Esta ação já não serve para esta denúncia.', 'nao_encontrado': 'Esta denúncia já não existe.',
+    'pin_errado': 'PIN errado.', 'pin_bloqueado': 'Demasiados PINs errados: espera 15 minutos.',
+    'sem_pin': 'Ainda não há PIN da moderação: define-o no SQL Editor (docs/21, «Email v2»).',
+    'menores': 'Criança em risco: a foto não se mostra aqui.'
+  };
+  var $ = function (id) { return document.getElementById(id); };
+
+  var frag = new URLSearchParams(location.hash.slice(1));
+  var t = frag.get('t') || '';
+  // Tira o token da barra de endereço (não fica para partilhar por engano).
+  try { history.replaceState(null, '', location.pathname); } catch (e) { /* sem importância */ }
+  if (!/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(t)) {
+    return estado('Falta o código do botão. Abre esta página a partir do email.', true);
+  }
+
+  var guardado = null;
+  try { guardado = localStorage.getItem(CHAVE_PIN); } catch (e) { /* sem armazenamento */ }
+  if (guardado) { $('pin').value = guardado; $('lembrar').checked = true; }
+
+  function estado(texto, erro) { var e = $('estado'); e.hidden = false; e.textContent = texto; e.className = erro ? 'aviso erro' : 'aviso'; }
+  function pin() {
+    var v = $('pin').value.trim();
+    try { if ($('lembrar').checked && v) localStorage.setItem(CHAVE_PIN, v); else localStorage.removeItem(CHAVE_PIN); } catch (e) { /* sem armazenamento */ }
+    return v;
+  }
+  function pedir(corpo) {
+    return fetch(URL_F, { method: 'POST', headers: { 'content-type': 'application/json', 'x-region': 'eu-west-1' },
+                          body: JSON.stringify(corpo), credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+  }
+  function json(r) { return r.json().catch(function () { return {}; }).then(function (j) { return { s: r.status, j: j }; }); }
+  function data(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    return d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' }) + ' às ' + d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  }
+  function linha(texto, suave, rotulo) {
+    var p = document.createElement('div'); p.className = suave ? 'linha suave' : 'linha';
+    if (rotulo) { var r = document.createElement('div'); r.className = 'rotulo'; r.textContent = rotulo; p.appendChild(r); }
+    p.appendChild(document.createTextNode(texto)); $('info').appendChild(p);
+  }
+  function aspas(s) { return '«' + s + '»'; }
+  function precisaPin() { $('pinCaixa').hidden = false; }
+
+  var cartao = null;
+
+  function mostrar(r) {
+    var c = r.cartao;
+    cartao = c;
+    $('estado').hidden = true;
+    $('cartao').hidden = false;
+    var f = $('faixa');
+    f.className = 'faixa ' + (c.gravidade || 'normal');
+    f.textContent = (c.gravidade === 'urgente' ? 'URGENTE · ' : '') + (c.alvo === 'local' ? 'Erro num local'
+      : (MOTIVOS[c.motivo] || 'Denúncia') + ' · ' + (ALVOS[c.alvo] || ''));
+    if (c.erro_local) {
+      linha(aspas(c.erro_local.nome || c.erro_local.local) + ' · ' + (TIPOS_ERRO[c.erro_local.tipo] || 'Outro'));
+      linha(aspas(c.erro_local.mensagem));
+    } else {
+      if (c.alvo === 'grupo') linha('Grupo ' + aspas(c.grupo || c.nome || '?'));
+      else linha(c.grupo ? 'Grupo ' + aspas(c.grupo) : 'Grupo apagado');
+      if (c.alvo === 'publicacao') {
+        linha('Publicada por ' + aspas(c.nome || '?') + (c.publicacao ? ' a ' + data(c.publicacao.criada_em) : ' (já apagada)'));
+        if (c.publicacao && c.publicacao.texto) linha(aspas(c.publicacao.texto), false, 'Legenda:');
+        if (c.publicacao && c.publicacao.escondida) linha('Escondida no jogo enquanto decides.', true);
+      } else if (c.alvo === 'membro') {
+        linha('Membro ' + aspas(c.nome || '?'));
+      }
+      var m = Object.keys(c.motivos || {}).map(function (k) { return c.motivos[k] + ' × ' + (MOTIVOS[k] || 'Outro motivo'); }).join(', ');
+      linha((c.abertas === 1 ? '1 denúncia por tratar' : c.abertas + ' denúncias por tratar') + (m ? ': ' + m : '') +
+            (c.total > c.abertas ? ' (' + c.total + ' no total)' : ''), true);
+      if (c.historico) linha(c.historico.denuncias ? 'Já teve ' + c.historico.denuncias + ' denúncia(s) noutros sítios, ' + c.historico.resolvidas + ' com razão.' : '1.ª vez denunciado.', true);
+      (c.detalhes || []).forEach(function (d) { linha(aspas(d), true, 'Quem denunciou escreveu:'); });
+    }
+
+    if (c.menores) $('menores').hidden = false;
+    if (c.tem_foto && c.aberta) {
+      // Nunca se descarrega sozinha (nem para um leitor de links): só com um toque, e com o PIN.
+      var b = $('verFoto');
+      b.hidden = false;
+      b.textContent = c.foto_desfocada ? 'Ver foto (desfocada)' : 'Ver foto';
+      b.onclick = function () { carregarFoto(c.foto_desfocada); };
+      precisaPin();
+    } else if (c.alvo === 'publicacao' && !c.menores) {
+      $('semFoto').hidden = false;
+      $('semFoto').textContent = !c.aberta ? 'A foto já não se mostra: a denúncia está fechada.'
+        : c.publicacao && c.publicacao.tipo === 'conquista' ? 'Uma conquista: não tem foto.' : 'Sem foto (já não existe no servidor).';
+    }
+
+    if (!c.aberta) return resultado('Já tratada' + (c.resolvido_em ? ' a ' + data(c.resolvido_em) : '') + ': ' + (FEITAS[c.acao] || c.acao || c.estado) + '.', false);
+    if (c.link_usado) return resultado(ERROS.link_usado, true);
+    if (!r.pode) return resultado(ERROS.acao_invalida, true);
+    $('acao').hidden = false;
+    $('descricao').textContent = r.descricao;
+    precisaPin();
+    var bc = $('confirmar');
+    bc.hidden = false;
+    var rotulo = ACOES[r.acao] || r.acao;
+    if (r.acao === 'manter' && c.publicacao && c.publicacao.escondida) rotulo = 'mostrar outra vez a todos';
+    else if (r.acao === 'expulsar' && c.alvo === 'publicacao') rotulo = 'Apagar e expulsar';
+    else if (r.acao === 'banir' && c.alvo === 'grupo') rotulo = 'Banir ' + aspas(c.banir_nome || 'o dono');
+    bc.textContent = 'Confirmar: ' + rotulo;
+    if (r.acao === 'apagar' || r.acao === 'banir' || r.acao === 'apagar-grupo' || r.acao === 'expulsar') bc.className = 'grande perigo';
+    bc.onclick = executar;
+  }
+
+  function carregarFoto(desfocada) {
+    var b = $('verFoto'); b.disabled = true; b.textContent = 'A carregar…';
+    pedir({ op: 'foto', t: t, pin: pin() }).then(function (r) {
+      if (r.ok) return r.blob().then(function (blob) { return { blob: blob }; });
+      return json(r);
+    }).then(function (x) {
+      b.disabled = false;
+      if (!x.blob) { b.textContent = desfocada ? 'Ver foto (desfocada)' : 'Ver foto'; return estado(ERROS[x.j && x.j.erro] || 'Sem foto.', true); }
+      $('estado').hidden = true;
+      b.hidden = true;
+      $('img').src = URL.createObjectURL(x.blob);
+      $('foto').hidden = false;
+      $('foto').className = desfocada ? 'foto desfocada' : 'foto';
+      $('mostrar').hidden = !desfocada;
+      $('mostrar').onclick = function () { $('foto').className = 'foto'; $('mostrar').hidden = true; };
+    }).catch(function () { b.disabled = false; estado('Sem ligação ao servidor.', true); });
+  }
+
+  function resultado(texto, erro) {
+    var r = $('resultado'); r.hidden = false; r.textContent = texto; r.className = erro ? 'aviso erro' : 'aviso feito';
+  }
+
+  function executar() {
+    var b = $('confirmar'); b.disabled = true; b.textContent = 'A fazer…';
+    pedir({ op: 'executar', t: t, pin: pin(), nota: $('nota').value.trim() || null })
+      .then(json)
+      .then(function (x) {
+        var e = x.j && x.j.erro;
+        if (e === 'pin_errado' || e === 'pin_bloqueado' || e === 'sem_pin') {
+          b.disabled = false; b.textContent = 'Confirmar outra vez';
+          return estado(ERROS[e], true);
+        }
+        $('acao').hidden = true; $('pinCaixa').hidden = true; b.hidden = true; $('estado').hidden = true;
+        if (x.j && x.j.ok) {
+          var txt = 'Feito: ' + (FEITAS[x.j.acao] || x.j.acao) + '. ' + (x.j.fechadas === 1 ? 'Fechada 1 denúncia.' : 'Fechadas ' + x.j.fechadas + ' denúncias.');
+          if (x.j.ficam > 0) txt += ' ' + (x.j.ficam === 1 ? 'Fica 1 denúncia mais recente' : 'Ficam ' + x.j.ficam + ' denúncias mais recentes') + ' por decidir: vêm no próximo email.';
+          resultado(txt, false);
+          if (x.j.menores && x.j.acao !== 'mantida') {
+            var pj = $('menores');
+            pj.hidden = false;
+            pj.textContent = 'Agora comunica à Polícia Judiciária (docs/21, «Crime»): não reencaminhes nem descarregues a imagem. ' +
+              'Cita o id da denúncia: ' + (cartao && cartao.id) + '. A foto fica guardada 90 dias como prova.';
+          }
+          return;
+        }
+        resultado(e === 'ja_tratada' ? 'Já tratada' + (x.j.em ? ' a ' + data(x.j.em) : '') + ': ' + (FEITAS[x.j.acao] || x.j.acao) + '.'
+                  : (ERROS[e] || 'Não deu (erro ' + x.s + '). Tenta outra vez ou trata no painel.'), true);
+      })
+      .catch(function () { b.disabled = false; b.textContent = 'Tentar outra vez'; estado('Sem ligação ao servidor.', true); });
+  }
+
+  pedir({ op: 'ver', t: t })
+    .then(json)
+    .then(function (x) {
+      if (x.s === 200 && x.j.cartao) return mostrar(x.j);
+      estado(ERROS[x.j && x.j.erro] || 'O servidor não respondeu (erro ' + x.s + '). Trata no painel (docs/21).', true);
+    })
+    .catch(function () { estado('Sem ligação ao servidor. O projeto pode estar pausado; trata no painel (docs/21).', true); });
+})();
+</script>
+</body>
+</html>
