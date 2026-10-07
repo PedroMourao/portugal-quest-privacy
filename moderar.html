@@ -112,7 +112,8 @@
                 'expulsar': 'Expulsar do grupo', 'banir': 'Banir', 'apagar-grupo': 'Apagar o grupo',
                 'resolver': 'Resolvido', 'rejeitar': 'Rejeitar' };
   var FEITAS = { 'apagada': 'publicação apagada', 'mantida': 'sem problema (rejeitada)', 'expulso': 'expulso do grupo', 'banido': 'banido',
-                 'grupo-apagado': 'grupo apagado', 'resolvido': 'resolvido', 'rejeitado': 'rejeitado' };
+                 'grupo-apagado': 'grupo apagado', 'resolvido': 'resolvido', 'rejeitado': 'rejeitado',
+                 'ja-apagada': 'já não havia nada a apagar nem a expulsar, só fechou a denúncia' };
   var ALVOS = { 'publicacao': 'publicação', 'membro': 'membro', 'grupo': 'grupo', 'local': 'erro num local' };
   var ERROS = {
     'link_invalido': 'Este link não é válido.', 'link_expirado': 'Este link expirou (cada botão vale 72 h). Volta no email «Ainda por decidir»; se for urgente, trata no painel.',
@@ -187,7 +188,8 @@
       var m = Object.keys(c.motivos || {}).map(function (k) { return c.motivos[k] + ' × ' + (MOTIVOS[k] || 'Outro motivo'); }).join(', ');
       linha((c.abertas === 1 ? '1 denúncia por tratar' : c.abertas + ' denúncias por tratar') + (m ? ': ' + m : '') +
             (c.total > c.abertas ? ' (' + c.total + ' no total)' : ''), true);
-      if (c.historico) linha(c.historico.denuncias ? 'Já teve ' + c.historico.denuncias + ' denúncia(s) noutros sítios, ' + c.historico.resolvidas + ' com razão.' : '1.ª vez denunciado.', true);
+      // Só as de ANTES deste caso, noutros sítios e fora deste email (denuncia_cartao).
+      if (c.historico) linha(c.historico.denuncias ? 'Antes disto, já teve ' + c.historico.denuncias + ' denúncia(s) noutros sítios, ' + c.historico.resolvidas + ' com razão.' : '1.ª vez denunciado.', true);
       (c.detalhes || []).forEach(function (d) { linha(aspas(d), true, 'Quem denunciou escreveu:'); });
     }
 
@@ -214,11 +216,18 @@
     var bc = $('confirmar');
     bc.hidden = false;
     var rotulo = ACOES[r.acao] || r.acao;
-    if (r.acao === 'manter' && c.publicacao && c.publicacao.escondida) rotulo = 'mostrar outra vez a todos';
-    else if (r.acao === 'expulsar' && c.alvo === 'publicacao') rotulo = 'Apagar e expulsar';
+    // Um botão de um email anterior cujo alvo já desapareceu (publicação/grupo
+    // apagado, quem já não está no grupo): só fecha. O servidor diz (so_fecha);
+    // sem ele (servidor antigo), o «Apagar» de um alvo que já não existe.
+    var soFecha = typeof r.so_fecha === 'boolean' ? r.so_fecha
+      : (r.acao === 'apagar' || r.acao === 'apagar-grupo') && c.alvo_existe === false && !c.foto_noutros;
+    if (soFecha) rotulo = ACOES.fechar;
+    else if (r.acao === 'manter' && c.publicacao && c.publicacao.escondida) rotulo = 'mostrar outra vez a todos';
+    // Quem publicou já não está no grupo: o «Apagar e expulsar» só apaga.
+    else if (r.acao === 'expulsar' && c.alvo === 'publicacao') rotulo = c.autor_no_grupo === false ? ACOES.apagar : 'Apagar e expulsar';
     else if (r.acao === 'banir' && c.alvo === 'grupo') rotulo = 'Banir ' + aspas(c.banir_nome || 'o dono');
     bc.textContent = 'Confirmar: ' + rotulo;
-    if (r.acao === 'apagar' || r.acao === 'banir' || r.acao === 'apagar-grupo' || r.acao === 'expulsar') bc.className = 'grande perigo';
+    if (!soFecha && (r.acao === 'apagar' || r.acao === 'banir' || r.acao === 'apagar-grupo' || r.acao === 'expulsar')) bc.className = 'grande perigo';
     bc.onclick = executar;
   }
 
@@ -258,6 +267,8 @@
         if (x.j && x.j.ok) {
           var txt = 'Feito: ' + (FEITAS[x.j.acao] || x.j.acao) + '. ' + (x.j.fechadas === 1 ? 'Fechada 1 denúncia.' : 'Fechadas ' + x.j.fechadas + ' denúncias.');
           if (x.j.ficam > 0) txt += ' ' + (x.j.ficam === 1 ? 'Fica 1 denúncia mais recente' : 'Ficam ' + x.j.ficam + ' denúncias mais recentes') + ' por decidir: vêm no próximo email.';
+          if (x.j.sem_objeto > 0) txt += ' ' + (x.j.sem_objeto === 1 ? 'Fechou-se também 1 denúncia sobre uma publicação/membro do grupo, que ficou'
+            : 'Fecharam-se também ' + x.j.sem_objeto + ' denúncias sobre publicações/membros do grupo, que ficaram') + ' sem objeto.';
           resultado(txt, false);
           if (x.j.menores && x.j.acao !== 'mantida') {
             var pj = $('menores');
